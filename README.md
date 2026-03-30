@@ -1,12 +1,8 @@
 # TeamAI — 多专家 Data Agent 协同平台 需求说明
 
-![TeamAI Demo](images/demo-screenshot.png)
-
 ## 项目概述
 
 基于 OpenClaw Gateway 构建的多 Agent 协同数据分析平台。多个领域专家 Agent 在同一个对话界面中协作，通过 PM 编排完成跨领域的企业数据分析任务。
-
-![架构图](images/architecture.png)
 
 ## 技术栈
 
@@ -60,13 +56,17 @@
 
 ### F4: 长期记忆（AgentCore Memory）
 
-- 每次 Agent 回复后，系统异步将问答对存入 AgentCore Memory
+- 每次 Agent 回复后，系统异步将问答对存入 AgentCore Memory（定时任务对话除外）
 - 记忆按 Agent 维度隔离（sessionId: teamai-{agentId}）
 - PM 可检索所有 Agent 的记忆（namespace: /facts/）
 - 其他 Agent 只检索自己的记忆（namespace: /summaries/）
 - 支持记忆的 CRUD 操作（列表、创建、更新、删除）
 - 支持记忆搜索
-- **定期记忆整理**：每天凌晨由 LLM 自动整理每个 Agent 的记忆 — 合并重复、清理过时、归纳业务规则
+- **定期记忆生命周期管理**（每天凌晨）：
+  - 第一步：从 TeamAI history 提炼前一天的对话要点，补写入 AgentCore Memory
+  - 第二步：由 LLM 自动整理每个 Agent 的记忆 — 合并重复、清理过时、归纳业务规则
+- **定时任务对话不写入 Memory**：scheduled 标记的对话跳过 storeMemory，避免刷新记录污染记忆
+- **MEMORY.md（精选记忆）**：每个 Agent 可维护一份精选知识文件，合并到 SOUL.md 中每次对话自动加载。支持在 Agent Profile 面板的设置 Tab 中在线编辑
 
 ### F5: 知识库（Bedrock Knowledge Base + RAG）
 
@@ -104,9 +104,10 @@
   - **SOUL_PRIVATE.md** — 人设、推理风格、协作行为、领域知识
   - **IDENTITY.md** — 名字、角色、emoji、签名
   - **TOOLS.md** — 工具定义
+  - **MEMORY.md** — 精选记忆（业务规则、必须记住的知识点），合并到 SOUL.md 中每次自动加载
   - **skills/** — 符号链接到全局 Skill 库
-- 支持两层 SOUL 合并：GLOBAL_SOUL.md（全局共享）+ SOUL_PRIVATE.md（专家独有），运行时自动合并
-- 支持在线编辑 SOUL/IDENTITY/TOOLS/模型/Skills（通过 Web 界面）
+- 支持三层 SOUL 合并：GLOBAL_SOUL.md（全局共享）+ SOUL_PRIVATE.md（专家独有）+ MEMORY.md（精选记忆），运行时自动合并
+- 支持在线编辑 SOUL/IDENTITY/TOOLS/MEMORY/模型/Skills（通过 Web 界面）
 - 支持动态创建和删除 Agent（通过 API）
 
 ### F8: Skill 体系
@@ -138,11 +139,12 @@
 
 - 支持 Cron 表达式调度
 - 定时向指定 Agent 发送消息触发任务
+- 定时任务对话标记 scheduled=true，不写入 AgentCore Memory
 - 支持创建、编辑、启用/禁用、手动触发、删除
 - 当前定时任务：
-  - 每小时：刷新数据湖语义模型
-  - 每小时：同步 Snowflake 语义视图
-  - 每天 2:00：整理 Agent 记忆
+  - 每天：刷新数据湖语义模型（LLM 自动生成 YAML）
+  - 每天：同步 Snowflake 语义视图到知识库
+  - 每天 2:00：记忆生命周期管理（提炼前一天对话 + 整理 Memory）
   - 每天 8:00：天气查询
 
 ### F11: 文件上传
