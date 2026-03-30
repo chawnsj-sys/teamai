@@ -1,5 +1,7 @@
 # TeamAI — 多专家 Data Agent 协同平台 需求说明
 
+![TeamAI Demo](images/demo-screenshot.png)
+
 ## 项目概述
 
 基于 OpenClaw Gateway 构建的多 Agent 协同数据分析平台。多个领域专家 Agent 在同一个对话界面中协作，通过 PM 编排完成跨领域的企业数据分析任务。
