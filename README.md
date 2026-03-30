@@ -6,6 +6,8 @@
 
 基于 OpenClaw Gateway 构建的多 Agent 协同数据分析平台。多个领域专家 Agent 在同一个对话界面中协作，通过 PM 编排完成跨领域的企业数据分析任务。
 
+![架构图](images/architecture.png)
+
 ## 技术栈
 
 - **Agent 运行时**：OpenClaw Gateway（开源，部署在 Amazon EC2）
