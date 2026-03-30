@@ -169,7 +169,7 @@
 - 表：app_sessions（用户会话）、app_user_events（用户行为事件）
 - 查询方式：Neptune Analytics 语义图查询 → SQL 生成 → Athena 执行
 - 语义层：Neptune Analytics 图（Table/Column 节点 + JOINS_ON 边 + Titan Embed 向量）
-- Graph ID：g-anhxl7nml8（us-east-1，16GB，向量维度 1024）
+- Graph ID：<your-graph-id>（建议 us-east-1，16GB，向量维度 1024）
 
 ### Snowflake 数据仓库（Snowflake 专家负责）
 - 数据库：MANUFACTURING_DEMO，Schema：ANALYTICS
@@ -196,3 +196,8 @@
 - Agent 配置：~/clawd/agents/（SOUL.md / IDENTITY.md / TOOLS.md / skills/）
 - 全局 Skill 库：~/clawd/skills/
 - 数据目录：~/multi-chat/history/（对话历史 + 频道配置 + 任务 + 定时任务）
+
+## 附件
+
+- [AWS 基础设施配置指南](requirements-aws-infra.md) — IAM 角色、Bedrock 模型开通、Neptune Analytics 图实例、S3 存储桶、EC2 部署等
+- [前端交互规范](requirements-frontend.md) — 页面结构、组件设计、交互流程、响应式布局、视觉规范
