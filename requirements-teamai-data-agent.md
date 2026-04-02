@@ -4,6 +4,10 @@
 
 基于 OpenClaw Gateway 构建的多 Agent 协同数据分析平台。多个领域专家 Agent 在同一个对话界面中协作，通过 PM 编排完成跨领域的企业数据分析任务。
 
+![架构图](images/architecture.png)
+
+![Demo 截图](images/demo-screenshot.png)
+
 ## 技术栈
 
 - **Agent 运行时**：OpenClaw Gateway（开源，部署在 Amazon EC2）
@@ -81,11 +85,11 @@
 
 ### F6: 语义层
 
-#### F6.1: Snowflake 侧 — Semantic Views 同步
-- 定时任务（每小时）从 Snowflake 读取所有 Semantic Views 的定义
-- 通过 Cortex CLI 执行 `DESCRIBE SEMANTIC VIEW` 获取详细内容
-- 将维度、指标、表关系、业务别名等语义信息同步到知识库
-- 存储为 `snowflake_semantic_views.md`
+#### F6.1: Snowflake 侧 — Semantic Views 同步到语义图
+- 定时任务（每天）从 Snowflake 读取所有 Semantic Views 的 JSON 定义
+- 解析表、维度、指标、关系，写入 Neptune Analytics 图（source=snowflake）
+- 先清后写模式：每次同步前删除 source=snowflake 的旧节点，再重新写入
+- 与数据湖侧共用同一个 Neptune 图实例，PM 查图可看到全部数据源
 
 #### F6.2: 数据湖侧 — Neptune Analytics 语义图
 - 定时任务（每天）从 Glue Catalog 获取所有表结构
@@ -145,7 +149,7 @@
 - 支持创建、编辑、启用/禁用、手动触发、删除
 - 当前定时任务：
   - 每天：同步数据湖表结构到 Neptune Analytics 语义图（Glue → 图节点/边 + 向量）
-  - 每天：同步 Snowflake 语义视图到知识库
+  - 每天：同步 Snowflake Semantic Views 到语义图（先清后写，source=snowflake）
   - 每天 2:00：记忆生命周期管理（提炼前一天对话 + 整理 Memory）
   - 每天 8:00：天气查询
 
@@ -166,10 +170,11 @@
 
 ### 数据湖（Amazon 专家负责）
 - 数据库：datalake_demo
-- 表：app_sessions（用户会话）、app_user_events（用户行为事件）
+- 表：ad_click_stream（广告点击流漏斗）、ad_creative_performance（广告素材效果汇总）
 - 查询方式：Neptune Analytics 语义图查询 → SQL 生成 → Athena 执行
 - 语义层：Neptune Analytics 图（Table/Column 节点 + JOINS_ON 边 + Titan Embed 向量）
 - Graph ID：<your-graph-id>（建议 us-east-1，16GB，向量维度 1024）
+- 数据特征：中国区 CTR 高（4.5%）但购买转化率极低（0.6%），漏斗在"商品浏览→加购"断裂
 
 ### Snowflake 数据仓库（Snowflake 专家负责）
 - 数据库：MANUFACTURING_DEMO，Schema：ANALYTICS
@@ -177,8 +182,9 @@
   - **营销效果分析**：渠道 × 活动 × 市场维度的花费、收入、ROI、转化和渠道归因（MKT_* 表）
   - **产品口碑分析**：品类 × 市场维度的用户评价，含情感标签（MKT_PRODUCT_REVIEWS）
   - **供应链管理**：供应商信息，含国别、质量评分、准时率（ERP_* 表）
-- Semantic Views：MARKETING_ANALYTICS、ERP_OPERATIONS、SALES_ORDER_BUSINESS
+- Semantic Views：MARKETING_ANALYTICS、ERP_OPERATIONS
 - 查询方式：Cortex CLI（cortex search / query / complete）+ Cortex Agent（QUICKSUITE）
+- 语义层同步：定时任务从 Semantic Views 解析表/维度/指标/关系，写入 Neptune Analytics 图（source=snowflake），与数据湖共用同一个图实例
 
 ## 安全与权限
 
