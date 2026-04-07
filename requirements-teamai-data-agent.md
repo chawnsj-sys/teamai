@@ -6,8 +6,6 @@
 
 ![架构图](images/architecture.png)
 
-![记忆治理](images/memory-governance.png)
-
 ![Demo 截图](images/demo-screenshot.png)
 
 ## 技术栈
@@ -52,7 +50,40 @@
 - 前端任务看板实时展示子任务状态和耗时
 - 支持中途取消任务
 
-### F3: 上下文增强管线
+### F3: 语义层
+
+#### F3.1: Snowflake 侧 — Semantic Views 同步到Neptune语义图
+- 定时任务（每天）从 Snowflake 读取所有 Semantic Views 的 JSON 定义
+- 解析表、维度、指标、关系，写入 Neptune Analytics 图（source=snowflake）
+- 先清后写模式：每次同步前删除 source=snowflake 的旧节点，再重新写入
+- 与数据湖侧共用同一个 Neptune 图实例，PM 查图可看到全部数据源
+
+#### F3.2: 数据湖侧 — Neptune Analytics 语义图
+- 定时任务（每天）从 Glue Catalog 获取所有表结构
+- 在 Neptune Analytics 图中创建 Table 和 Column 节点，建立 HAS_COLUMN 和 JOINS_ON 边
+- 通过 Titan Embed v2 生成向量，写入图节点（vectors.upsert）
+- 查询时：用户问题 → 向量搜索找到相关表/列 → 图遍历获取完整上下文（列定义、JOIN 关系）→ 生成 SQL → Athena 执行
+- 相比 YAML + RAG 方案，图结构天然表达表间关系，多表 JOIN 查询更准确
+
+#### F3.3: 按需生成语义模型（gen-semantic-model Skill）
+- 用户可以对 Amazon 专家说"帮我生成 xxx 表的语义模型"
+- Agent 从 Glue Catalog 获取 DDL + 示例数据
+- 按 YAML 模板生成语义模型
+- 输出到对话框，用户可编辑后保存到知识库
+
+### F4: 需求理解确认（Human-in-the-Loop）
+
+- 用户提问后，前端拦截消息，调用 intent-helper 进行需求分析
+- intent-helper 复用 Skill 的向量搜索（Neptune Analytics）+ 图遍历获取语义上下文，结合历史记忆中的 rule，由 LLM 生成结构化需求理解
+- 前端展示确认卡片，包含：分析对象、指标定义、过滤条件、时间范围、拆分维度
+- 每项标注信息来源：🔵 语义图（数据字典）、🟢 历史规则（Memory）、⚪ 待确认（Agent 推断）
+- 可行性检查：如果语义图中找不到支撑某项分析的数据，标注 ⚠️ 并禁用确认按钮
+- SQL 预览：折叠展示生成的 SQL，用户可查看
+- 多轮确认：用户补充信息后卡片更新，⚠️ 消失
+- 确认后将确认的 SQL 直接发给 Agent 执行（不重新生成）
+- 跳过条件：闲聊、确认语、简短回复不触发需求确认
+
+### F5: 上下文增强管线
 
 - 每条消息发送给 Agent 之前，系统并行执行：
   - 从 OpenSearch 向量索引检索该 Agent 的相关历史记忆（kNN 搜索，topK=3，score>0.4），按类型权重 × 时间衰减排序
@@ -60,7 +91,7 @@
 - 检索结果以前缀形式拼接到原始消息中
 - 检索超时 5 秒自动降级（不阻塞对话）
 
-### F4: 长期记忆（Adaptive Memory）
+### F6: 长期记忆（Adaptive Memory）
 
 - **存储**：Amazon OpenSearch Serverless 向量索引（Bedrock Titan Embed v2，1024 维），直接 kNN 搜索，无第三方 Memory 框架依赖
 - **记忆按 Agent 维度隔离**（user_id 字段过滤）
@@ -80,7 +111,9 @@
 - **定时任务对话不写入 Memory**：scheduled 标记的对话跳过提取
 - **MEMORY.md（精选记忆）**：每个 Agent 可维护一份精选知识文件，合并到 SOUL.md 中每次对话自动加载
 
-### F5: 知识库（Bedrock Knowledge Base + RAG）
+![记忆治理](images/memory-governance.png)
+
+### F7: 知识库（Bedrock Knowledge Base + RAG）
 
 - 每个 Agent 有独立的知识空间（S3 前缀: {agentId}/）
 - 通过元数据过滤实现 Agent 间知识隔离
@@ -90,28 +123,7 @@
 - 上传/删除后自动触发 Knowledge Base 重新向量化（StartIngestionJob）
 - 中文文件名支持（latin1 → utf8 转码）
 
-### F6: 语义层
-
-#### F6.1: Snowflake 侧 — Semantic Views 同步到语义图
-- 定时任务（每天）从 Snowflake 读取所有 Semantic Views 的 JSON 定义
-- 解析表、维度、指标、关系，写入 Neptune Analytics 图（source=snowflake）
-- 先清后写模式：每次同步前删除 source=snowflake 的旧节点，再重新写入
-- 与数据湖侧共用同一个 Neptune 图实例，PM 查图可看到全部数据源
-
-#### F6.2: 数据湖侧 — Neptune Analytics 语义图
-- 定时任务（每天）从 Glue Catalog 获取所有表结构
-- 在 Neptune Analytics 图中创建 Table 和 Column 节点，建立 HAS_COLUMN 和 JOINS_ON 边
-- 通过 Titan Embed v2 生成向量，写入图节点（vectors.upsert）
-- 查询时：用户问题 → 向量搜索找到相关表/列 → 图遍历获取完整上下文（列定义、JOIN 关系）→ 生成 SQL → Athena 执行
-- 相比 YAML + RAG 方案，图结构天然表达表间关系，多表 JOIN 查询更准确
-
-#### F6.3: 按需生成语义模型（gen-semantic-model Skill）
-- 用户可以对 Amazon 专家说"帮我生成 xxx 表的语义模型"
-- Agent 从 Glue Catalog 获取 DDL + 示例数据
-- 按 YAML 模板生成语义模型
-- 输出到对话框，用户可编辑后保存到知识库
-
-### F7: Agent 配置体系
+### F8: Agent 配置体系
 
 - 每个 Agent 通过一组文件定义：
   - **SOUL_PRIVATE.md** — 人设、推理风格、协作行为、领域知识
@@ -123,7 +135,24 @@
 - 支持在线编辑 SOUL/IDENTITY/TOOLS/MEMORY/模型/Skills（通过 Web 界面）
 - 支持动态创建和删除 Agent（通过 API）
 
-### F9: 频道管理
+### F9: 记忆管理 UI
+
+- 按类型 / 按领域双 Tab 视图
+- 类型视图：展示 rule / preference / snapshot / other 四种类型，显示权重和衰减配置
+- 记忆详情展开：显示完整文本、SQL 代码块（浅色主题）、创建时间
+- 配置面板：类型说明、门控开关、Agent 选择
+- 支持记忆的删除操作
+
+### F10: 执行可观测性
+
+- 每次 Agent 回复时，展示本次执行的元信息
+- 命中的历史记忆条数（memory）
+- 检索的知识库文档条数（bedrock kb）
+- 调用的工具次数（tool）
+- 总耗时（秒）
+- 用户可直观看到 Agent 的回答基于什么上下文得出
+
+### F11: 频道管理
 
 - 支持群聊频道（多 Agent）和私聊频道（单 Agent）
 - 群聊支持隐私模式和开放模式切换
@@ -132,7 +161,7 @@
 - 对话历史按频道持久化（JSONL 格式）
 - 支持清空频道历史
 
-### F10: 定时任务
+### F12: 定时任务
 
 - 支持 Cron 表达式调度
 - 定时向指定 Agent 发送消息触发任务
@@ -141,28 +170,8 @@
 - 当前定时任务：
   - 每天：同步数据湖表结构到 Neptune Analytics 语义图（Glue → 图节点/边 + 向量）
   - 每天：同步 Snowflake Semantic Views 到语义图（先清后写，source=snowflake）
-  - 每天 2:00：extract-helper 定期提取记忆（程序化 snapshot + LLM rule/preference）
-  - 每天 8:00：天气查询
-
-## 数据领域
-
-### 数据湖（Amazon 专家负责）
-- 数据库：datalake_demo
-- 表：ad_click_stream（广告点击流漏斗）、ad_creative_performance（广告素材效果汇总）
-- 查询方式：Neptune Analytics 语义图查询 → SQL 生成 → Athena 执行
-- 语义层：Neptune Analytics 图（Table/Column 节点 + JOINS_ON 边 + Titan Embed 向量）
-- Graph ID：<your-graph-id>（建议 us-east-1，16GB，向量维度 1024）
-- 数据特征：中国区 CTR 高（4.5%）但购买转化率极低（0.6%），漏斗在"商品浏览→加购"断裂
-
-### Snowflake 数据仓库（Snowflake 专家负责）
-- 数据库：MANUFACTURING_DEMO，Schema：ANALYTICS
-- 业务领域：
-  - **营销效果分析**：渠道 × 活动 × 市场维度的花费、收入、ROI、转化和渠道归因（MKT_* 表）
-  - **产品口碑分析**：品类 × 市场维度的用户评价，含情感标签（MKT_PRODUCT_REVIEWS）
-  - **供应链管理**：供应商信息，含国别、质量评分、准时率（ERP_* 表）
-- Semantic Views：MARKETING_ANALYTICS、ERP_OPERATIONS
-- 查询方式：Cortex CLI（cortex search / query / complete）+ Cortex Agent（QUICKSUITE）
-- 语义层同步：定时任务从 Semantic Views 解析表/维度/指标/关系，写入 Neptune Analytics 图（source=snowflake），与数据湖共用同一个图实例
+  - 实时：extract-helper 定期扫描对话日志，提取新记忆（程序化 snapshot + LLM rule/preference）
+  - 每天 8:00：天气查询（测试）
 
 ## 安全与权限
 
@@ -177,7 +186,7 @@
 - Amazon EC2 实例
 - TeamAI 服务：端口 3001（systemd: multi-chat.service）
 - OpenClaw Gateway：端口 3000（systemd: clawdbot-gateway.service）
-- Memory 服务：端口 3005（systemd: mem0-service）— 直接 OpenSearch + Bedrock Embed，无第三方框架
+- Memory 服务：端口 3005（systemd: memory-service）— 直接 OpenSearch + Bedrock Embed，无第三方框架
 - Agent 配置：~/clawd/agents/（SOUL.md / IDENTITY.md / TOOLS.md / skills/）
 - 全局 Skill 库：~/clawd/skills/
 - 数据目录：~/multi-chat/history/（对话历史 + 频道配置 + 任务 + 定时任务）
