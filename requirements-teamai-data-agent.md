@@ -25,7 +25,6 @@
 
 | Agent | ID | 角色 | 负责领域 | 核心 Skill |
 |-------|-----|------|----------|-----------|
-| 小克 | main | 通用助理 | 日常问答、信息检索 | exa-web-search-free |
 | Alex | pm | 项目经理 | 任务拆解、分发、汇总 | 无（纯编排） |
 | Nova | amazon-expert | Amazon 数据专家 | 用户行为分析（数据湖） | aws-cli, datalake_query, gen-semantic-model |
 | 凌 | snowflake-expert | Snowflake 数据专家 | 营销效果、产品口碑、供应链 | snowflake-cortex-code |
@@ -124,22 +123,6 @@
 - 支持在线编辑 SOUL/IDENTITY/TOOLS/MEMORY/模型/Skills（通过 Web 界面）
 - 支持动态创建和删除 Agent（通过 API）
 
-### F8: Skill 体系
-
-- 每个 Skill 是一个独立目录，包含 SKILL.md（frontmatter + 使用说明）
-- 全局 Skill 库，通过符号链接按需挂载给不同 Agent
-- 当前 Skill 列表：
-  - agent-browser — 浏览器控制
-  - memory-service — 长期记忆服务（OpenSearch 向量索引 CRUD + kNN 搜索）
-  - aws-cli — Amazon CLI 操作
-  - datalake_query — 数据湖智能查询（Neptune 图查询 → SQL 生成 → Athena 执行）
-  - gen-semantic-model — 数据湖语义模型生成
-  - snowflake-cortex-code — Snowflake Cortex 操作
-  - gpu-management — GPU 集群管理
-  - exa-web-search-free — 网页搜索
-  - task-status — 任务状态管理
-  - kiro-cli — Kiro CLI 集成
-
 ### F9: 频道管理
 
 - 支持群聊频道（多 Agent）和私聊频道（单 Agent）
@@ -160,19 +143,6 @@
   - 每天：同步 Snowflake Semantic Views 到语义图（先清后写，source=snowflake）
   - 每天 2:00：extract-helper 定期提取记忆（程序化 snapshot + LLM rule/preference）
   - 每天 8:00：天气查询
-
-### F11: 文件上传
-
-- 支持图片（jpg/png/gif/webp）、视频（mp4/mov/webm）、文档（pdf/doc/docx/txt/csv/xlsx/zip）
-- 最大 150MB
-- 上传后返回 URL，可在对话中引用
-
-### F12: 流式事件推送
-
-- Agent 推理过程通过 WebSocket 实时推送
-- 事件类型：思考中（lifecycle.start）、工具调用（tool）、内容流（content/assistant）、完成（lifecycle.end）
-- 前端可展示 Agent 当前状态（thinking / working / online / offline）
-- 支持查看 Agent 的工具调用历史（session 文件解析）
 
 ## 数据领域
 
