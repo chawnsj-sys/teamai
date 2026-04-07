@@ -6,6 +6,8 @@
 
 ![架构图](images/architecture.png)
 
+![记忆治理](images/memory-governance.png)
+
 ![Demo 截图](images/demo-screenshot.png)
 
 ## 技术栈
@@ -13,7 +15,7 @@
 - **Agent 运行时**：OpenClaw Gateway（开源，部署在 Amazon EC2）
 - **前端/中间件**：TeamAI（Node.js + Express + WebSocket）
 - **模型推理**：Amazon Bedrock（Claude Sonnet 4.5）
-- **长期记忆**：Amazon Bedrock AgentCore Memory
+- **长期记忆**：Amazon OpenSearch Serverless（向量索引 + kNN 搜索，Bedrock Titan Embed v2）
 - **知识库**：Amazon Bedrock Knowledge Base + S3 + OpenSearch Serverless
 - **数据湖**：Amazon S3 + Athena + Glue Catalog
 - **语义图**：Amazon Neptune Analytics（向量搜索 + 图遍历，存储数据湖表关系和语义）
@@ -54,24 +56,30 @@
 ### F3: 上下文增强管线
 
 - 每条消息发送给 Agent 之前，系统并行执行：
-  - 从 AgentCore Memory 检索该 Agent 的相关历史记忆（topK=3，score>0.4）
+  - 从 OpenSearch 向量索引检索该 Agent 的相关历史记忆（kNN 搜索，topK=3，score>0.4），按类型权重 × 时间衰减排序
   - 从 Bedrock Knowledge Base 检索该 Agent 领域内的知识文档（topK=3，score>0.3）
 - 检索结果以前缀形式拼接到原始消息中
 - 检索超时 5 秒自动降级（不阻塞对话）
 
-### F4: 长期记忆（AgentCore Memory）
+### F4: 长期记忆（Adaptive Memory）
 
-- 每次 Agent 回复后，系统异步将问答对存入 AgentCore Memory（定时任务对话除外）
-- 记忆按 Agent 维度隔离（sessionId: teamai-{agentId}）
-- PM 可检索所有 Agent 的记忆（namespace: /facts/）
-- 其他 Agent 只检索自己的记忆（namespace: /summaries/）
+- **存储**：Amazon OpenSearch Serverless 向量索引（Bedrock Titan Embed v2，1024 维），直接 kNN 搜索，无第三方 Memory 框架依赖
+- **记忆按 Agent 维度隔离**（user_id 字段过滤）
+- **记忆类型体系**（v4，纯规则分类，零 LLM 调用写入）：
+  - 📌 rule（规则）— 业务规则、指标定义、业务逻辑澄清，权重 1.8，永不衰减
+  - ❤️ preference（偏好）— 展示风格/格式偏好，权重 1.0，永不衰减
+  - 📸 snapshot（快照）— 查询需求描述 + SQL，权重 0.8，30 天衰减
+  - 💬 other（其他）— 兜底，权重 0.5，7 天衰减
+- **写入路径 — extract-helper 子 Agent**（定期从对话日志提取，fire-and-forget）：
+  - 程序化提取 snapshot：从 session jsonl 的 toolCall（SQL）+ toolResult 中直接提取需求描述和 SQL，不需要 LLM
+  - LLM 提炼 rule/preference：从用户消息中严格筛选业务规则和偏好，一次性分析请求不提取
+  - 所有类型直接 embed + 写入 OpenSearch（/add-raw），不经过 LLM fact extraction
+- **读取路径 — searchMemory**：
+  - 用户提问 → Bedrock Titan Embed → kNN 搜索 OpenSearch → 按 finalScore = vectorScore × typeWeight × decayFactor 排序 → 注入到用户消息前缀
+  - rule/preference 始终注入，snapshot 按相关性和衰减排序
 - 支持记忆的 CRUD 操作（列表、创建、更新、删除）
-- 支持记忆搜索
-- **定期记忆生命周期管理**（每天凌晨）：
-  - 第一步：从 TeamAI history 提炼前一天的对话要点，补写入 AgentCore Memory
-  - 第二步：由 LLM 自动整理每个 Agent 的记忆 — 合并重复、清理过时、归纳业务规则
-- **定时任务对话不写入 Memory**：scheduled 标记的对话跳过 storeMemory，避免刷新记录污染记忆
-- **MEMORY.md（精选记忆）**：每个 Agent 可维护一份精选知识文件，合并到 SOUL.md 中每次对话自动加载。支持在 Agent Profile 面板的设置 Tab 中在线编辑
+- **定时任务对话不写入 Memory**：scheduled 标记的对话跳过提取
+- **MEMORY.md（精选记忆）**：每个 Agent 可维护一份精选知识文件，合并到 SOUL.md 中每次对话自动加载
 
 ### F5: 知识库（Bedrock Knowledge Base + RAG）
 
@@ -122,7 +130,7 @@
 - 全局 Skill 库，通过符号链接按需挂载给不同 Agent
 - 当前 Skill 列表：
   - agent-browser — 浏览器控制
-  - agentcore-memory — 长期记忆操作
+  - memory-service — 长期记忆服务（OpenSearch 向量索引 CRUD + kNN 搜索）
   - aws-cli — Amazon CLI 操作
   - datalake_query — 数据湖智能查询（Neptune 图查询 → SQL 生成 → Athena 执行）
   - gen-semantic-model — 数据湖语义模型生成
@@ -145,12 +153,12 @@
 
 - 支持 Cron 表达式调度
 - 定时向指定 Agent 发送消息触发任务
-- 定时任务对话标记 scheduled=true，不写入 AgentCore Memory
+- 定时任务对话标记 scheduled=true，不触发记忆提取
 - 支持创建、编辑、启用/禁用、手动触发、删除
 - 当前定时任务：
   - 每天：同步数据湖表结构到 Neptune Analytics 语义图（Glue → 图节点/边 + 向量）
   - 每天：同步 Snowflake Semantic Views 到语义图（先清后写，source=snowflake）
-  - 每天 2:00：记忆生命周期管理（提炼前一天对话 + 整理 Memory）
+  - 每天 2:00：extract-helper 定期提取记忆（程序化 snapshot + LLM rule/preference）
   - 每天 8:00：天气查询
 
 ### F11: 文件上传
@@ -199,6 +207,7 @@
 - Amazon EC2 实例
 - TeamAI 服务：端口 3001（systemd: multi-chat.service）
 - OpenClaw Gateway：端口 3000（systemd: clawdbot-gateway.service）
+- Memory 服务：端口 3005（systemd: mem0-service）— 直接 OpenSearch + Bedrock Embed，无第三方框架
 - Agent 配置：~/clawd/agents/（SOUL.md / IDENTITY.md / TOOLS.md / skills/）
 - 全局 Skill 库：~/clawd/skills/
 - 数据目录：~/multi-chat/history/（对话历史 + 频道配置 + 任务 + 定时任务）
