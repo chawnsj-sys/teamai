@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-基于 OpenClaw Gateway 构建的多 Agent 协同数据分析平台。多个领域专家 Agent 在同一个对话界面中协作，通过 PM 编排完成跨领域的企业数据分析任务。
+基于 OpenClaw Gateway 构建的多 Agent 协同数据分析平台。多个领域专家 Agent（数据湖、数据仓库）在同一个对话界面中协作，通过 PM 编排完成跨领域的企业数据分析任务。系统通过 Neptune Analytics 语义图理解数据结构，通过 Adaptive Memory 积累业务经验，通过 Human-in-the-Loop 确认机制确保查询准确性。
 
 ![架构图](images/architecture.png)
 
@@ -70,6 +70,8 @@
 - Agent 从 Glue Catalog 获取 DDL + 示例数据
 - 按 YAML 模板生成语义模型
 - 输出到对话框，用户可编辑后保存到知识库
+
+![语义视图](images/semantic-view.png)
 
 ### F4: 需求理解确认（Human-in-the-Loop）
 
