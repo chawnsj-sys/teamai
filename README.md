@@ -71,6 +71,13 @@
 - 按 YAML 模板生成语义模型
 - 输出到对话框，用户可编辑后保存到知识库
 
+#### F3.4: Snowflake Cortex Analyst API 集成
+- 凌的需求确认阶段通过 Cortex Analyst REST API（`POST /api/v2/cortex/analyst/message`）生成 SQL
+- 使用 `semantic_view` 参数引用 Snowflake Semantic View（MARKETING_ANALYTICS / ERP_OPERATIONS）
+- 认证：通过 snowflake-connector 获取 session token，再用 `Snowflake Token` 认证
+- 生成的 SQL 不执行，只用于需求确认卡片展示和用户确认后的直接执行
+- 确认后通过 Python snowflake-connector 直接执行 SQL（不走 cortex CLI）
+
 ![语义视图](images/semantic-view.png)
 
 ### F4: 需求理解确认（Human-in-the-Loop）
@@ -90,6 +97,8 @@
 - 确认后将确认的 SQL + 原始提问一起发给 Agent 执行（不重新生成）
 - **记忆闭环**：确认后 extract-helper 对比原始提问和最终确认的 items，用户补充的条件自动提炼为 preference 存入记忆，下次同类问题自动应用为 🟢 历史经验依据
 - 跳过条件：闲聊、确认语、简短回复不触发需求确认；用户可点"跳过，直接查"绕过确认
+- **PM 群聊合并卡片**：@pm 提问时，intent-helper 同时调 datalake（Neptune+LLM）和 snowflake（Cortex Analyst）生成两段 SQL，合并为一张卡片展示 Nova 和凌两个子卡片
+- **直接 API 分发**：确认后 TeamAI 直接通过 API 将确认的 SQL 分别发给 Nova 和凌执行（不经过 PM 的 WebSocket delegate），两边结果回来后发给 PM 汇总
 
 ### F5: 上下文增强管线
 
@@ -124,6 +133,10 @@
   - 记忆详情展开：显示完整文本、SQL 代码块（浅色主题）、创建时间
   - 配置面板：类型说明、门控开关、Agent 选择
   - 支持记忆的删除操作
+- **Auto Dream（记忆整理）**：
+  - 定时任务（每天凌晨 2 点）对每个 Agent 的记忆做整理
+  - LLM 分析所有记忆，执行：合并重复（相同内容合并为一条）、升级类型（出现 3 次以上的 preference → rule）、清理噪音（无实际价值的记忆删除）、精炼文本
+  - 参考 Claude Code 的 AutoDream 设计，但适配 Data Agent 的单 session 长期运行模式
 
 ![记忆治理](images/memory-governance.png)
 
@@ -178,6 +191,7 @@
   - 每天：同步 Snowflake Semantic Views 到语义图（先清后写，source=snowflake）
   - 实时：extract-helper 定期扫描对话日志，提取新记忆（程序化 snapshot + LLM rule/preference）
   - 每天 8:00：天气查询（测试）
+  - 每天 2:00：Auto Dream 记忆整理（对 aws-expert、snowflake-expert、main 三个 Agent 执行记忆合并、升级、清理）
 
 ## 安全与权限
 
