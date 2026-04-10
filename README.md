@@ -176,6 +176,10 @@ open http://localhost:3001
 - [Snowflake Cortex AI](https://www.snowflake.com/en/developers/guides/getting-started-with-snowflake-cortex-ai/) — Snowflake 原生 AI
 - [Kiro](https://kiro.dev) — AI IDE，本项目的开发工具
 
+## 安全说明
+
+本项目为 Demo 演示用途，未在安全层面做生产级加固。如需部署到生产环境，请自行补充 HTTPS、OAuth、网络隔离、审计日志等安全措施。
+
 ## License
 
 MIT
