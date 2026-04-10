@@ -11,12 +11,12 @@ DB = 'datalake_demo'
 SF_ACCOUNT = os.environ.get('SF_ACCOUNT', '')
 SF_USER = os.environ.get('SF_USER', '')
 SF_PAT = os.environ.get('SF_PAT', '')
-SF_DATABASE = 'MANUFACTURING_DEMO'
-SF_SCHEMA = 'ANALYTICS'
-SF_WAREHOUSE = 'MANUFACTURING_DEMO_WH'
+SF_DATABASE = os.environ.get('SF_DATABASE', 'MANUFACTURING_DEMO')
+SF_SCHEMA = os.environ.get('SF_SCHEMA', 'ANALYTICS')
+SF_WAREHOUSE = os.environ.get('SF_WAREHOUSE', 'MANUFACTURING_DEMO_WH')
 SF_SEMANTIC_VIEWS = {
-    'MKT': 'MANUFACTURING_DEMO.ANALYTICS.MARKETING_ANALYTICS',
-    'ERP': 'MANUFACTURING_DEMO.ANALYTICS.ERP_OPERATIONS',
+    'MKT': f'{SF_DATABASE}.{SF_SCHEMA}.{os.environ.get("SF_SV_MKT", "MARKETING_ANALYTICS")}',
+    'ERP': f'{SF_DATABASE}.{SF_SCHEMA}.{os.environ.get("SF_SV_ERP", "ERP_OPERATIONS")}',
 }
 
 bedrock = boto3.client('bedrock-runtime', region_name=REGION)

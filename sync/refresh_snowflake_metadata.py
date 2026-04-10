@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """Refresh Snowflake metadata to TeamAI knowledge base via API"""
 import subprocess, json, urllib.request
@@ -5,7 +6,7 @@ from datetime import datetime
 
 AGENT_ID = 'snowflake-expert'
 API_URL = f'http://localhost:3001/api/knowledge/{AGENT_ID}'
-CORTEX = '/home/ubuntu/.local/bin/cortex'
+CORTEX = os.environ.get('CORTEX_CLI', 'cortex')
 
 # 1. Get Snowflake metadata via cortex search
 result = subprocess.run(
@@ -21,7 +22,7 @@ except:
 
 # 2. Parse into structured markdown
 md = f"# Snowflake 元数据\n\n"
-md += f"- Database: MANUFACTURING_DEMO\n"
+md += ff"- Database: {os.environ.get('SF_DATABASE', 'MANUFACTURING_DEMO')}\n"
 md += f"- Schema: ANALYTICS\n"
 md += f"- Connection: manufacturing\n"
 md += f"- 更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"

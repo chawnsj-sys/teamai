@@ -37,7 +37,7 @@ def main():
     print(f"[{datetime.now()}] 同步 Snowflake 表结构到语义图...")
 
     # 连接 Snowflake
-    with open("/home/ubuntu/.snowflake/connections.toml", "rb") as f:
+    with open(os.environ.get("SNOWFLAKE_CONNECTIONS", os.path.expanduser("~/.snowflake/connections.toml")), "rb") as f:
         cfg = tomllib.load(f)["connections"]["manufacturing"]
     conn = snowflake.connector.connect(**cfg)
     cur = conn.cursor()
@@ -46,7 +46,7 @@ def main():
     clear_snowflake_nodes()
 
     # 获取 Semantic Views 列表
-    cur.execute("SHOW SEMANTIC VIEWS IN MANUFACTURING_DEMO.ANALYTICS")
+    cur.execute(f"SHOW SEMANTIC VIEWS IN {os.environ.get('SF_DATABASE', 'MANUFACTURING_DEMO')}.{os.environ.get('SF_SCHEMA', 'ANALYTICS')}")
     sv_names = [row[1] for row in cur]
     print(f"  发现 {len(sv_names)} 个 Semantic Views: {sv_names}")
 
@@ -75,7 +75,7 @@ def main():
                     tname = row[4]
                     all_tables.add(tname)
                     desc = f"Snowflake table {tname} in MANUFACTURING_DEMO.ANALYTICS, semantic view: {sv_name}"
-                    result = run_query(f"MERGE (t:Table {{name: '{tname}', source: 'snowflake'}}) SET t.database = 'MANUFACTURING_DEMO', t.schema = 'ANALYTICS', t.semantic_view = '{sv_name}', t.description = '{desc}' RETURN id(t) AS nodeId")
+                    result = run_query(f"MERGE (t:Table {{name: '{tname}', source: 'snowflake'}}) SET t.database = '' + os.environ.get('SF_DATABASE', 'MANUFACTURING_DEMO') + '', t.schema = '' + os.environ.get('SF_SCHEMA', 'ANALYTICS') + '', t.semantic_view = '{sv_name}', t.description = '{desc}' RETURN id(t) AS nodeId")
                     if result and result.get('results'):
                         nid = result['results'][0].get('nodeId')
                         if nid:
@@ -102,7 +102,7 @@ def main():
             comment = table_comments.get(tname, "")
             desc = comment if comment else f"Snowflake table {tname}, {sv_name}"
 
-            result = run_query(f"MERGE (t:Table {{name: '{tname}', source: 'snowflake'}}) SET t.database = 'MANUFACTURING_DEMO', t.schema = 'ANALYTICS', t.semantic_view = '{sv_name}', t.description = '{desc[:200].replace(chr(39), '')}' RETURN id(t) AS nodeId")
+            result = run_query(f"MERGE (t:Table {{name: '{tname}', source: 'snowflake'}}) SET t.database = '' + os.environ.get('SF_DATABASE', 'MANUFACTURING_DEMO') + '', t.schema = '' + os.environ.get('SF_SCHEMA', 'ANALYTICS') + '', t.semantic_view = '{sv_name}', t.description = '{desc[:200].replace(chr(39), '')}' RETURN id(t) AS nodeId")
             if result and result.get('results'):
                 nid = result['results'][0].get('nodeId')
                 if nid:

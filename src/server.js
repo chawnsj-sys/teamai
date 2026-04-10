@@ -22,10 +22,10 @@ const TASKS_FILE = path.join(HISTORY_DIR, 'tasks.json');
 const TEAMAI_CONFIG_PATH = path.join(__dirname, 'teamai-config.json');
 function loadTeamAIConfig() {
   const defaults = {
-    clawdbotConfig: '/home/ubuntu/.clawdbot/clawdbot.json',
-    agentsDir: '/home/ubuntu/clawd/agents',
-    skillsDir: '/home/ubuntu/clawd/skills',
-    clawdbotHome: '/home/ubuntu/.clawdbot',
+    clawdbotConfig: process.env.CLAWDBOT_CONFIG || '/home/ubuntu/.clawdbot/clawdbot.json',
+    agentsDir: process.env.AGENTS_DIR || '/home/ubuntu/clawd/agents',
+    skillsDir: process.env.SKILLS_DIR || '/home/ubuntu/clawd/skills',
+    clawdbotHome: process.env.CLAWDBOT_HOME || '/home/ubuntu/.clawdbot',
     wsPort: 3000,
     webPort: 3001
   };
@@ -449,7 +449,7 @@ app.post('/api/analyze-intent', express.json(), async (req, res) => {
     // Call Python helper via stdin/stdout (avoids shell escaping issues)
     const { execSync } = require('child_process');
     const input = JSON.stringify({ question: message, rules: rules, context: context || [], previousItems: previousItems || [], agentId: aid });
-    const result = execSync('python3 /home/ubuntu/multi-chat/intent-helper.py', {
+    const result = execSync('python3 ' + path.join(__dirname, 'intent-helper.py') + '', {
       input: input,
       timeout: 90000,
       encoding: 'utf8'
@@ -648,7 +648,7 @@ class AgentConnection {
                 if (!p) return; // Already resolved via chat final
                 try {
                   const fs = require('fs');
-                  const sessDir = '/home/ubuntu/.clawdbot/agents/' + this.agentId + '/sessions/';
+                  const sessDir = (TEAMAI_CFG.clawdbotHome || process.env.CLAWDBOT_HOME || '/home/ubuntu/.clawdbot') + '/agents/' + this.agentId + '/sessions/';
                   const files = fs.readdirSync(sessDir).filter(f => f.endsWith('.jsonl')).sort((a,b) => fs.statSync(sessDir+b).mtimeMs - fs.statSync(sessDir+a).mtimeMs);
                   if (!files.length) return;
                   const lines = fs.readFileSync(sessDir + files[0], 'utf8').trim().split('\n');
@@ -1528,7 +1528,7 @@ async function runExtractMemories() {
   const state = loadExtractState();
   for (const aid of EXTRACT_AGENTS) {
     try {
-      const sd = path.join(TEAMAI_CFG.clawdbotHome || '/home/ubuntu/.clawdbot', 'agents', aid, 'sessions');
+      const sd = path.join(TEAMAI_CFG.clawdbotHome || process.env.CLAWDBOT_HOME || '/home/ubuntu/.clawdbot', 'agents', aid, 'sessions');
       if (!fs.existsSync(sd)) continue;
       const ff = fs.readdirSync(sd).filter(f => f.endsWith('.jsonl')).map(f => ({ name: f, mt: fs.statSync(path.join(sd, f)).mtimeMs })).sort((a, b) => b.mt - a.mt);
       if (!ff.length) continue;

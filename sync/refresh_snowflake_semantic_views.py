@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 定时任务：同步 Snowflake Semantic Views 到知识库
@@ -9,9 +10,9 @@ from datetime import datetime
 
 AGENT_ID = 'snowflake-expert'
 API_URL = f'http://localhost:3001/api/knowledge/{AGENT_ID}'
-CORTEX = '/home/ubuntu/.local/bin/cortex'
+CORTEX = os.environ.get('CORTEX_CLI', 'cortex')
 CONNECTION = 'manufacturing'
-DB = 'MANUFACTURING_DEMO'
+DB = os.environ.get('SF_DATABASE', 'MANUFACTURING_DEMO')
 SCHEMA = 'ANALYTICS'
 
 def run_cortex_sql(sql):
