@@ -14,7 +14,7 @@ const wss = new WebSocketServer({ server });
 
 const PORT = 3001;
 const GATEWAY_URL = 'ws://localhost:3000';
-const TOKEN = process.env.GATEWAY_TOKEN || '';
+const TOKEN = process.env.GATEWAY_TOKEN || 'clawdbot-test-token-2026';
 const HISTORY_DIR = path.join(__dirname, 'history');
 const CHANNELS_FILE = path.join(HISTORY_DIR, 'channels.json');
 const TASKS_FILE = path.join(HISTORY_DIR, 'tasks.json');
@@ -22,10 +22,10 @@ const TASKS_FILE = path.join(HISTORY_DIR, 'tasks.json');
 const TEAMAI_CONFIG_PATH = path.join(__dirname, 'teamai-config.json');
 function loadTeamAIConfig() {
   const defaults = {
-    clawdbotConfig: process.env.CLAWDBOT_CONFIG || '/home/ubuntu/.clawdbot/clawdbot.json',
-    agentsDir: process.env.AGENTS_DIR || '/home/ubuntu/clawd/agents',
-    skillsDir: process.env.SKILLS_DIR || '/home/ubuntu/clawd/skills',
-    clawdbotHome: process.env.CLAWDBOT_HOME || '/home/ubuntu/.clawdbot',
+    clawdbotConfig: '/home/ubuntu/.clawdbot/clawdbot.json',
+    agentsDir: '/home/ubuntu/clawd/agents',
+    skillsDir: '/home/ubuntu/clawd/skills',
+    clawdbotHome: '/home/ubuntu/.clawdbot',
     wsPort: 3000,
     webPort: 3001
   };
@@ -72,7 +72,7 @@ const { NeptuneGraphClient, ExecuteQueryCommand } = require('@aws-sdk/client-nep
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const neptuneClient = new NeptuneGraphClient({ region: 'us-east-1' });
 const bedrockRtClient = new BedrockRuntimeClient({ region: 'us-east-1' });
-const GRAPH_ID = process.env.NEPTUNE_GRAPH_ID || '';
+const GRAPH_ID = process.env.NEPTUNE_GRAPH_ID || 'g-anhxl7nml8';
 
 async function neptuneQuery(q) {
   const cmd = new ExecuteQueryCommand({ graphIdentifier: GRAPH_ID, queryString: q, language: 'OPEN_CYPHER' });
@@ -80,6 +80,28 @@ async function neptuneQuery(q) {
   const body = await new Response(resp.payload).text();
   return JSON.parse(body);
 }
+
+// --- Neptune routing for PM: find relevant tables and their source ---
+async function neptuneRouteForPM(question) {
+  try {
+    const encoder = new TextEncoder();
+    const body = JSON.stringify({ inputText: question });
+    const cmd = new InvokeModelCommand({ modelId: 'amazon.titan-embed-text-v2:0', body: encoder.encode(body), contentType: 'application/json' });
+    const resp = await bedrockRtClient.send(cmd);
+    const embedding = JSON.parse(new TextDecoder().decode(resp.body)).embedding;
+    const vecQuery = `MATCH (t:Table) WITH t CALL neptune.algo.vectors.get(t) YIELD embedding WHERE embedding IS NOT NULL WITH t, neptune.algo.vectors.cosine_similarity(embedding, ${JSON.stringify(embedding)}) AS score WHERE score > 0.3 RETURN t.name AS name, t.source AS source, t.description AS description, score ORDER BY score DESC LIMIT 5`;
+    const result = await neptuneQuery(vecQuery);
+    const tables = (result.results || []).map(r => ({ name: r.name, source: r.source, desc: (r.description || '').substring(0, 60), score: Math.round(r.score * 100) / 100 }));
+    if (tables.length === 0) return null;
+    const sources = [...new Set(tables.map(t => t.source))];
+    const tableList = tables.map(t => `- ${t.name} (${t.source}) ${t.desc}`).join('\n');
+    return { tables, sources, tableList };
+  } catch (e) {
+    console.error('[pm-route] Neptune error:', e.message);
+    return null;
+  }
+}
+
 const { searchKnowledge, uploadKnowledge, deleteKnowledge, listKnowledge, syncKnowledge, upsertKnowledge } = require("./knowledge-helper");
 
 // Load agents dynamically from clawdbot.json
@@ -449,7 +471,7 @@ app.post('/api/analyze-intent', express.json(), async (req, res) => {
     // Call Python helper via stdin/stdout (avoids shell escaping issues)
     const { execSync } = require('child_process');
     const input = JSON.stringify({ question: message, rules: rules, context: context || [], previousItems: previousItems || [], agentId: aid });
-    const result = execSync('python3 ' + path.join(__dirname, 'intent-helper.py') + '', {
+    const result = execSync('python3 /home/ubuntu/multi-chat/intent-helper.py', {
       input: input,
       timeout: 90000,
       encoding: 'utf8'
@@ -648,7 +670,7 @@ class AgentConnection {
                 if (!p) return; // Already resolved via chat final
                 try {
                   const fs = require('fs');
-                  const sessDir = (TEAMAI_CFG.clawdbotHome || process.env.CLAWDBOT_HOME || '/home/ubuntu/.clawdbot') + '/agents/' + this.agentId + '/sessions/';
+                  const sessDir = '/home/ubuntu/.clawdbot/agents/' + this.agentId + '/sessions/';
                   const files = fs.readdirSync(sessDir).filter(f => f.endsWith('.jsonl')).sort((a,b) => fs.statSync(sessDir+b).mtimeMs - fs.statSync(sessDir+a).mtimeMs);
                   if (!files.length) return;
                   const lines = fs.readFileSync(sessDir + files[0], 'utf8').trim().split('\n');
@@ -763,6 +785,22 @@ class AgentConnection {
     const sessionKey = `agent:${this.agentId}:multi-chat-${channel}`;
     // Search memory for relevant context
     let enrichedMessage = message;
+    // PM: use Neptune routing instead of memory+kb
+    if (this.agentId === 'pm') {
+      try {
+        const route = await Promise.race([neptuneRouteForPM(message), new Promise(r => setTimeout(() => r(null), 5000))]);
+        if (route) {
+          const routeCtx = '[数据路由信息 - 以下是与用户问题相关的数据表及其所属平台]\n' + route.tableList + '\n涉及平台: ' + route.sources.join(', ') + '\n\n[请基于以上信息判断任务分配]\n';
+          enrichedMessage = routeCtx + message;
+          console.log('[pm-route] found ' + route.tables.length + ' tables, sources: ' + route.sources.join(','));
+        }
+      } catch (e) { console.error('[pm-route] error:', e.message); }
+      const id = String(++this.requestId);
+      this.pendingMap.set(sessionKey, { sessionKey, channel, buffer: '', onReply, originalMessage: message, startTime: Date.now(), memoryCount: 0, kbCount: 0, memoryTexts: [], kbTexts: [], scheduled: options.scheduled || false });
+      this.status = 'thinking'; this.broadcastStatus();
+      this.ws.send(JSON.stringify({ type: 'req', id, method: 'chat.send', params: { sessionKey, idempotencyKey: `mc-${Date.now()}-${id}`, message: enrichedMessage } }));
+      return;
+    }
     let _memCount = 0, _kbCount = 0, _memTexts = [], _kbTexts = [];
     try {
       console.log("[send] " + this.agentId + " searching memory..."); const memories = await Promise.race([searchMemory(this.agentId, message, 3), new Promise(r => setTimeout(() => r([]), 5000))]); console.log("[send] " + this.agentId + " memory done, found=" + memories.length); _memCount = memories.length; _memTexts = memories.map(m => m.text.substring(0, 100));
@@ -1528,7 +1566,7 @@ async function runExtractMemories() {
   const state = loadExtractState();
   for (const aid of EXTRACT_AGENTS) {
     try {
-      const sd = path.join(TEAMAI_CFG.clawdbotHome || process.env.CLAWDBOT_HOME || '/home/ubuntu/.clawdbot', 'agents', aid, 'sessions');
+      const sd = path.join(TEAMAI_CFG.clawdbotHome || '/home/ubuntu/.clawdbot', 'agents', aid, 'sessions');
       if (!fs.existsSync(sd)) continue;
       const ff = fs.readdirSync(sd).filter(f => f.endsWith('.jsonl')).map(f => ({ name: f, mt: fs.statSync(path.join(sd, f)).mtimeMs })).sort((a, b) => b.mt - a.mt);
       if (!ff.length) continue;
